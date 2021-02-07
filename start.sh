@@ -11,8 +11,7 @@ logdir="logs"
 t_name=${1##*/}
 filename=${t_name%_*}
 #get current day
-#curday=`date +%Y-%m-%d-%H%M%S`
-curday=`date +%Y%m%d`
+curday=`date +%Y%m%d-%H%M%S`
 scan_log=${curday}_${filename}_scan.log
 open_ports_raw=${curday}_${filename}_open.log
 open_ports=${curday}_${filename}_ports.log
