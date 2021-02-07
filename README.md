@@ -28,5 +28,18 @@ start.sh $path_to_ip_file
 ```
 report.html will be generated at $path_to_webserver/scan.
 
+e.g:
+ip.txt
+```
+192.168.10.1/24
+192.166.8.2-254
+199.166.11.22
+```
+scan
+```
+start.sh ip.txt
+```
+report.html will be at /var/www/html/scan/20210207_ip/report.html after scan complete
+
 ## note
 it is just a demo version, many features is on the way...
