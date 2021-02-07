@@ -1,0 +1,18 @@
+log_name   scan.log
+work_thread_cnt 10
+http2png_user  clt
+http2png_path  png
+dirsearch  /opt/tools/dirsearch/dirsearch.py
+http2png  /opt/tools/scrying/scrying
+webpath  /var/www/html/scan
+##### self define finger print
+Springboot|ico|/favicon.ico|946
+Springboot|file|/env|servletContextInitParams
+Rancher|ico|/assets/images/logos/favicon.ico|5430
+SanforVPN|header|cookie|TWFID
+SanforVPN|ico|/por/images/default_logo.gif|4078
+alibaba-RAP2|ico|/favicon.png|1125
+RsySync|ico|/assets/raysync.ico|4286
+HWsousuo|ico|/static/favicon.ico|4286
+WiseEye|ico|/cas_server/favicon.ico|32988
+Kong|file|/|no Route matched with those values
