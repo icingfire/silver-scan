@@ -7,6 +7,8 @@ import json
 import socket
 import ssl
 import random
+from lib.basic import *
+from app import *
 from datetime import datetime
 from Wappalyzer import Wappalyzer, WebPage
 import OpenSSL.crypto as crypto
@@ -20,10 +22,8 @@ MAX_REPEATED_COUNT = 50
 allow_random_useragent = True
 allow_random_x_forward = True
 
-g_conf = {}
 g_wappalyzer = Wappalyzer.latest()
-g_finger_conf = []
-
+g_scan_tag = "12345678"
 
 # 随机HTTP头
 USER_AGENTS = [
@@ -79,6 +79,40 @@ def set_header():
     return headers
 
 
+def init_db(word_dir):
+    global g_scan_tag
+    new_scan = Scans(g_scan_tag, word_dir)
+    try:
+        db.session.add(new_scan)
+        db.session.commit()
+    except Exception as e:
+        logging.info("Error happened in init_db" + str(e))
+        return
+
+
+def save_scan(in_port_info):
+    global g_scan_tag
+    new_data = Assets(in_port_info, g_scan_tag)
+    try:
+        db.session.add(new_data)
+        db.session.commit()
+    except Exception as e:
+        logging.info("Error happened in save_scan " + str(e) + " " + in_port_info.dump())
+        return
+
+
+def update_dirs_db(in_port_info):
+    global g_scan_tag
+    t_w = compute_weight(in_port_info)
+    try:
+        db.session.query(Assets).filter(Assets.ip == in_port_info.ip).filter(Assets.port == in_port_info.port).\
+            filter(Assets.scan_tag == g_scan_tag).update({'weight': t_w, "dirs": in_port_info.dirs})
+        db.session.commit()
+    except Exception as e:
+        logging.info("Error happened in save_scan " + str(e) + " " + in_port_info.dump())
+        return
+
+
 ####
 # PORT   STATE SERVICE VERSION
 # 22/tcp open  ssh     OpenSSH 6.7p1 Debian 5+deb8u8 (protocol 2.0)
@@ -88,72 +122,8 @@ def set_header():
 ##########
 def get_svc_name_from_nmap(in_port_info, nmap_str):
     t_l = nmap_str.split("\n")
-    t_l2 = t_l[1].split(" ")
+    t_l2 = t_l[1].split()
     in_port_info.svc_name = " ".join(t_l2[2:])
-
-
-class FingerInfo:
-    def __init__(self):
-        self.wappalyzer_info = ""
-        self.content_len = ""
-        self.cert_info = ""
-        self.title = ""
-        self.cms = ""
-        self.server = ""
-
-    def __repr__(self):
-        return self.wappalyzer_info + \
-            str(self.content_len) + "\t" + self.title + "\t" + self.cms + "\t" + self.cert_info + "\t" + self.server
-
-
-class PortInfo:
-    def __init__(self, ip, port):
-        self.ip = ip
-        self.port = port
-        self.svc_name = ""
-        self.png = ""
-        self.dirs = ""
-        self.nmap = ""
-        self.finger = FingerInfo()
-
-    def get_url(self):
-        if self.svc_name == "http" and self.port == "80":
-            return self.svc_name + "://" + self.ip
-        elif self.svc_name == "https" and self.port == "443":
-            return self.svc_name + "://" + self.ip
-        return self.svc_name + "://" + self.ip + ":" + self.port
-
-    def wait_for_nmap(self, timeout=600):
-        sleep_gap = 3
-        max_cnt = timeout / sleep_gap + 1
-        cnt = 0
-        while self.nmap == "":
-            time.sleep(3.0)
-            cnt += 1
-            if cnt >= max_cnt:
-                logging.info("wait time out in nmap scan " + self.ip + ":" + self.port)
-                break
-
-    def wait_for_dirs(self, timeout=60):
-        sleep_gap = 3
-        max_cnt = timeout / sleep_gap + 1
-        cnt = 0
-        while self.dirs == "":
-            time.sleep(3.0)
-            cnt += 1
-            if cnt >= max_cnt:
-                logging.info("wait time out in dirs bruting " + self.get_url())
-                break
-
-    def __repr__(self):
-        return self.ip + " " + self.port + " " + self.svc_name
-
-    def dump(self):
-        return self.ip + " " + self.port + " " + self.svc_name + "\n" + \
-            "png path: " + self.png + "\n" + \
-            "dirs: " + self.dirs + "\n" + \
-            "nmap result: " + self.nmap + "\n" + \
-            "finger print: " + str(self.finger) + "\n"
 
 
 class HostInfo:
@@ -240,7 +210,7 @@ class NmapSvc:
 
                 print("Nmap start scan " + p_info.ip + ":" + p_info.port)
                 logging.info("Nmap start scan " + p_info.ip + ":" + p_info.port)
-                cmd = "nmap -sC --script=vuln -sV -p" + p_info.port + " -n -Pn " + p_info.ip + " 2>/dev/null"
+                cmd = "nmap -sC -sV -p" + p_info.port + " -n -Pn " + p_info.ip + " 2>/dev/null"
                 ret = os.popen(cmd).read()
                 idx = ret.find("PORT ")
                 if idx > -1:
@@ -254,9 +224,10 @@ class NmapSvc:
 
                 p_info.nmap = nmap_ret
                 get_svc_name_from_nmap(p_info, nmap_ret)
+                save_scan(p_info)
             except Exception as e:
+                logging.info("nmap svc " + str(e))
                 # queue will raise exception, if queue is empty and timeout
-                pass
         logging.info("NmapSvc consumer exit ")
 
     @staticmethod
@@ -270,9 +241,10 @@ class NmapSvc:
 
     @staticmethod
     def wait_for_empty():
+        logging.info("wait for empty in NmapSvc start")
         while not NmapSvc.que.empty():
-            logging.info("wait for empty in NmapSvc")
-            time.sleep(3.0)
+            time.sleep(5.0)
+        logging.info("wait for empty in NmapSvc end")
 
 
 class DirBrute:
@@ -293,13 +265,13 @@ class DirBrute:
                 logging.info("start dirsearch " + url)
                 t_f = p_info.ip + "_" + p_info.port + "_" + "ds.txt"
                 logging.info("python3 " + script_ds + " -u " + url + " -w $(dirname " + script_ds + ")/db/dicc.txt -F -e \* --plain-text-report=" + t_f)
-                os.system("python3 " + script_ds + " -u " + url + " -w $(dirname " + script_ds + ")/db/dicc.txt -F -e \* --plain-text-report=" + t_f + " >/dev/null")
+                os.system("python3 " + script_ds + " -u " + url + " -w $(dirname " + script_ds + ")/db/dicc.txt -F -e \* --timeout=4 --plain-text-report=" + t_f + " >/dev/null")
                 p_info.dirs = parse_dirsearch(t_f)
-                os.system("rm -f " + t_f)
+                #os.system("rm -f " + t_f)
+                update_dirs_db(p_info)
             except Exception as e:
                 # queue will raise exception(nothing in exception info), if queue is empty and timeout
-                print(str(e)) #############
-                pass
+                logging.info("Exception in DirBrute, " + str(e)) #############
         logging.info("dirbrute consumer exit ")
 
     @staticmethod
@@ -313,29 +285,10 @@ class DirBrute:
 
     @staticmethod
     def wait_for_empty():
+        logging.info("wait for empty in DirBrute start")
         while not DirBrute.que.empty():
-            logging.info("wait for empty in DirBrute")
-            time.sleep(3)
-
-
-"""
-def parse_dirsearch(file):
-    ret_str = ""
-    try:
-        p = re.compile(r'.*\[\d\d:\d\d:\d\d]\s+(200|401)\s+-\s+(\S+)\s+-\s+(\S+)')
-        with open(file) as f_h:
-            for line in f_h:
-                m_o = p.match(line)
-                if m_o:
-                    ret_str += m_o.group(1) + "  " + m_o.group(2) + "  " + m_o.group(3).split('\x1b')[0] + "\n"
-    except Exception as e:
-        ret_str = "open " + file + " failed in parse_dirsearch " + str(e) ##########
-        print("open " + file + " failed in parse_dirsearch " + str(e))
-
-    if ret_str == "":
-        ret_str = "no 200 or 401 page found"
-    return ret_str
-"""
+            time.sleep(5.0)
+        logging.info("wait for empty in DirBrute end")
 
 
 def find_repeated_size(in_file):
@@ -345,33 +298,50 @@ def find_repeated_size(in_file):
     cmd = "awk '{print $2}' " + in_file + " | sort -n | uniq -c |sort -rn -k 1"
     t_l = os.popen(cmd).read().split('\n')[:-1]
     for one_line in t_l:
-        t_list = one_line.strip().split(" ")
-        if int(t_list[0]) > MAX_REPEATED_COUNT:
+        t_list = one_line.strip().split()
+        if safe_int(t_list[0]) > MAX_REPEATED_COUNT:
             repeated_size_list.append(t_list[1])
     #print("repeated_size_list" + str(repeated_size_list))
     return repeated_size_list
 
 
+def check_one_dir(one_dir_line):
+    dirsearch_line = re.compile('^\d{3}\s+\d+\w\s+http.*$')
+    if dirsearch_line.match(one_dir_line):
+        return True
+    else:
+        return False
+
+
 def parse_dirsearch(file):
     ret_str = ""
-    repeated_size_list = find_repeated_size(file)
+    t_list = []
     try:
+        repeated_size_list = find_repeated_size(file)
         with open(file) as f_h:
             for line in f_h:
-                l_l = line.strip().split()
+                if not check_one_dir(line):
+                    continue
+                l_l = line.strip().replace("MB", "000KB").replace("KB","000B").split()
                 if l_l[1] in repeated_size_list:
                     continue
                 t_url = l_l[2]
                 url_pr = urlparse(l_l[2])
-                link = '<a href="' + t_url.replace("\"", "%22") + '" target="_blank">' + url_pr.path + '</a>'
-                line = l_l[0] + " " + l_l[1].rjust(5, " ") + " " + link + "\n"
-                ret_str += line
+                l_l.append(t_url)
+                l_l[2] = url_pr.path
+                t_list.append(l_l)
+
+        t_list2 = sorted(t_list, key=lambda x:(safe_int(x[0]), -safe_int(x[1][:-1]), x[2]))
+        for one_l in t_list2:
+            link = '<a href="' + one_l[3].replace("\"", "%22") + '" target="_blank">' + one_l[2] + '</a><br>'
+            line = one_l[0] + " " + one_l[1].rjust(8, " ") + " " + link + "\n"
+            ret_str += line
 
         if len(repeated_size_list) > 0:
             ret_str += ','.join(repeated_size_list) + " size repeat over " + str(MAX_REPEATED_COUNT) + " times , deleted"
     except Exception as e:
         ret_str = "open " + file + " failed in parse_dirsearch " + str(e) ##########
-        print("open " + file + " failed in parse_dirsearch " + str(e))
+        logging.info("open " + file + " failed in parse_dirsearch " + str(e))
 
     if ret_str == "":
         ret_str = "no 200 or 401 page found"
@@ -403,7 +373,6 @@ def get_cert(host, port):
         s.settimeout(CONNECT_TIMEOUT)
         s.connect((host, int(port)))
         # upgrade the socket to SSL without checking the certificate
-        # !!!! don't transfer any sensitive data over this socket !!!!
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
@@ -416,7 +385,7 @@ def get_cert(host, port):
             t_cert = ""
         return t_cert
     except Exception as e:
-        logging.info(str(e) + " " + host + ":" + port)
+        logging.info("in get_cert " + str(e) + " " + host + ":" + str(port))
         return ""
 
 
@@ -436,7 +405,8 @@ def check_banner(in_port_info):
         response = requests.get(url, stream=False, headers=set_header(), timeout=CONNECT_TIMEOUT, allow_redirects=False, verify=False)
         html = response.content
         headers = response.headers
-        finger_i.content_len = len(html) if 'Content-Length' not in headers else int(headers['Content-Length'])
+        finger_i.ret_code = response.status_code
+        finger_i.content_len = len(html) if 'Content-Length' not in headers else safe_int(headers['Content-Length'])
         finger_i.server = '' if 'Server' not in headers else headers['Server']
         if html:
             try:
@@ -458,6 +428,10 @@ def check_banner(in_port_info):
                         continue
                 elif mark_info[1] == 'file':
                     try:
+                        if mark_info[2] != '/':
+                            t_url = url + mark_info[2]
+                            t_resp = requests.get(t_url, stream=False, headers=set_header(), timeout=CONNECT_TIMEOUT, allow_redirects=False, verify=False)
+                            html = t_resp.content
                         if re.search(mark_info[3], html, re.I):
                             finger_i.cms = mark_info[0]
                     except Exception as e:
@@ -475,13 +449,18 @@ def check_banner(in_port_info):
         if response.status_code in [301, 302]:
             finger_i.title = "Location To:" + headers['Location']
     except Exception as e:
-        print(str(in_port_info) + "\t" + str(e))
+        logging.info("Exception in check_banner " + str(in_port_info) + "\t" + str(e))
 
 
 def get_finger(in_port_info):
     global g_wappalyzer
-    webpage = WebPage.new_from_url(in_port_info.get_url(), verify=False, timeout=6)
-    ret = g_wappalyzer.analyze_with_versions_and_categories(webpage)
+    try:
+        webpage = WebPage.new_from_url(in_port_info.get_url(), verify=False, timeout=6)
+        ret = g_wappalyzer.analyze_with_versions_and_categories(webpage)
+    except Exception as e:
+        logging.info("Exception in get_finger, " + str(e))
+        ret = []
+ 
     t_finger = ""
     for one_key in ret:
         if len(ret[one_key]["versions"]) != 0:
@@ -497,47 +476,43 @@ def get_finger(in_port_info):
 
 # key process
 def check_services(in_host_info):
+    port_count = len(in_host_info.ports_info)
     for one_p_info in in_host_info.ports_info:
+        if port_count >= 100:  # 端口开启过多的异常资产降低权重
+            one_p_info.weight_factor = -10000
         if try_http(one_p_info):
-            Http2png.url2png(one_p_info)
-            DirBrute.put(one_p_info)
             get_finger(one_p_info)
+            Http2png.url2png(one_p_info)
+            save_scan(one_p_info)  # save first so we can get partial results, update it after dirbrute
+            if port_count < 100:
+                DirBrute.put(one_p_info)
             #one_p_info.wait_for_dirs()
         else:
             NmapSvc.put(one_p_info)
 
 
-def parse_conf(config_file):
-    global g_conf, g_finger_conf
-    try:
-        finger_conf_flag = 0
-        with open(config_file) as f_h:
-            for line in f_h:
-                if line.find("#####") > -1:
-                    finger_conf_flag = 1
-                    continue
-                if finger_conf_flag == 0:
-                    t_l = line.strip(' \r\n').split(" ")
-                    g_conf[t_l[0]] = " ".join(t_l[1:]).strip(' ')
-                else:
-                    g_finger_conf.append(line.strip())
-    except Exception as e:
-        logging.info("read " + config_file + " failed." + str(e))
-
-
-def create_work_dir(ports_file):
-    work_dir = "target"
+def pre_init(ports_file):
+    # set work directory
+    work_dir = "static"
     idx = ports_file.find("_ports")
     if idx != -1:
-        work_dir = ports_file[:idx]
+        work_dir += "/" + ports_file[:idx]
     else:
         dt = datetime.now()
-        work_dir = dt.strftime('%Y%m%d-%H%M%S')
+        work_dir += "/" + dt.strftime('%Y%m%d-%H%M%S')
     os.mkdir(work_dir)
     os.chdir(work_dir)
+
+    # insert scan task id into database
+    init_db(work_dir)
+
+    # set path to save pngs
     os.mkdir(g_conf["http2png_path"])
+
+    # set user account to exec scrying tool
     if g_conf["http2png_user"] not in os.popen("grep -E '/bin/bash|/bin/sh' /etc/passwd|awk -F: '{print $1}'").read().strip().split("\n"):
-        os.system("useradd " + g_conf["http2png_user"] + " -p 123")
+        t_pass = random.choice('abcdefghijklmnopqrstuvwxyz!@#$%^&*()')
+        os.system("useradd " + g_conf["http2png_user"] + " -p " + t_pass)
     os.system("chown " + g_conf["http2png_user"] + ": " + g_conf["http2png_path"])
 
 
@@ -556,11 +531,16 @@ class CltScan:
             one_ip_list.sort()
 
     def _generate_hosts(self):
+        rabbish_l = []
         for tmp in self.l.items():
             t_host = HostInfo(tmp[0])
             for one_port in tmp[1]:
                 t_host.push(PortInfo(tmp[0], one_port))
-            self.hosts.append(t_host)
+            if len(tmp[1]) < 100:
+                self.hosts.append(t_host)
+            else:  # 当某个ip对应的端口数超过100时，该资产多半有异常，比如 waf 蜜罐 之类，会耗费大量扫描时间
+                rabbish_l.append(t_host)
+        self.hosts.extend(rabbish_l)   # 异常资产放到最后
 
     def init(self):
         Http2png.init()
@@ -642,7 +622,7 @@ class CltScan:
                 html_body += "<h4>&nbsp;&nbsp;" + one_port.port + "</h4>"
                 if one_port.svc_name.find("http") >= 0:
                     png_relative_path = g_conf["http2png_path"] + "/" + one_port.png
-                    html_body += '<a href="' + png_relative_path + '"><div class="imagebox"><img width="400px" src="' + \
+                    html_body += '<a href="' + one_port.get_url().replace('"','%22') + '"><div class="imagebox"><img width="400px" src="' + \
                         png_relative_path + '" /><br>' + one_port.get_url() + '</div></a>'
 
                     html_body += '<div class="section"><h5>&nbsp;&nbsp;&nbsp;&nbsp;finger print</h5>'
@@ -672,15 +652,10 @@ if __name__ == '__main__':
     parse_conf("./config")
     logging.basicConfig(filename=g_conf["log_name"], level=logging.INFO,
                         format='%(asctime)s %(filename)s[line:%(lineno)d] %(message)s', datefmt='%Y-%m-%d')
-    #print(g_conf)
-    #print(g_finger_conf)
-
+    g_scan_tag = int(time.time())
     myscan = CltScan(sys.argv[1])
     myscan.init()
-    create_work_dir(sys.argv[1])
+    pre_init(sys.argv[1])
     myscan.start_services()
     myscan.generate_report()
-
-
-
 
