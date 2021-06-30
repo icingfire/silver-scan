@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<title>Scan History</title>
+<!-- <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}"> -->
+<div class="page">
+	<form method="post">
+		<table style="width: 40%;margin:auto">
+		{% for i in range(count) %}
+			<tr><td><a href="{{ url_for('list_by_tag', tag_id=scan_tags[i]) }}" target="_blank">
+				<h3>{{ times[i] }}</h3></a></td>
+				<td><input type="checkbox" name="compare{{i}}" value="{{ scan_tags[i] }}" ></td>
+			</tr>
+		{% endfor %}
+			<tr><td></td><td><input type="submit" value="compare"></td></tr>
+		</table>
+	</form>
+</div>
