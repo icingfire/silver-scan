@@ -3,7 +3,7 @@ another tool gathering ports/fingers/dirs/pictures
 
 ## Install
 ```
-apt install chromium-browser nmap masscan apache2
+apt install chromium-browser nmap masscan
 ```
 download tools from github:
 ```
@@ -19,15 +19,12 @@ config file:
 ```
 dirsearch  $path_to_python_dirsearch.py
 http2png  $path_to_bin_scrying
-webpath  $path_to_webserver/scan
 ```
 ## Usage
 ```
 start.sh $path_to_ip_file
 # file format can be recognized by masscan
 ```
-report.html will be generated at $path_to_webserver/scan.
-
 e.g:
 ip.txt
 ```
@@ -39,7 +36,15 @@ scan
 ```
 start.sh ip.txt
 ```
-report.html will be at /var/www/html/scan/20210207_ip/report.html after scan complete
+report location
+```
+http://your_ip:58080/mamasaidthenameistooshort/list
+```
+other usefull link
+```
+http://your_ip:58080/mamasaidthenameistooshort/        # history scans
+http://your_ip:58080/mamasaidthenameistooshort/w       # show by waight
+```
 
 ## note
-it is just a demo version, many features is on the way...
+it is still a demo version, many features is on the way...
